@@ -23,7 +23,9 @@ addition to being spoken, so the pipeline is auditable without hardware.
 from __future__ import annotations
 
 import logging
+import platform
 import queue
+import subprocess
 import threading
 from dataclasses import dataclass
 from typing import Optional
@@ -32,11 +34,16 @@ from config import SIMULATE, TTS_RATE, TTS_VOICE, TTS_VOLUME
 
 log = logging.getLogger(__name__)
 
+# macOS: pyttsx3 uses NSSpeechSynthesizer which requires the AppKit main run
+# loop — it hangs silently in a background thread. Use the built-in `say`
+# command instead, which is thread-safe on macOS.
+_IS_MACOS: bool = platform.system() == "Darwin"
+
 
 @dataclass
 class _SpeechRequest:
-    text:    str
-    urgent:  bool = False
+    text: str
+    urgent: bool = False
     # Sentinel for clean shutdown.
     shutdown: bool = False
 
@@ -59,9 +66,7 @@ class Speaker:
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run, name="tts", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="tts", daemon=True)
         self._thread.start()
         log.info("[tts] speaker started")
 
@@ -108,12 +113,35 @@ class Speaker:
     # ── background TTS thread ─────────────────────────────────────────────
 
     def _run(self) -> None:
+        if _IS_MACOS:
+            self._macos_say_loop()
+        else:
+            self._pyttsx3_loop()
+
+    def _macos_say_loop(self) -> None:
+        """macOS TTS via the built-in `say` command (thread-safe)."""
+        log.info("[tts] macOS — using 'say' command  rate=%d", TTS_RATE)
+        while True:
+            try:
+                req = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if req.shutdown:
+                break
+            log.info("[tts] speaking: '%s'", req.text)
+            self._current_text = req.text
+            cmd = ["say", "-r", str(TTS_RATE), req.text]
+            if TTS_VOICE:
+                cmd = ["say", "-v", TTS_VOICE, "-r", str(TTS_RATE), req.text]
+            subprocess.run(cmd, check=False)
+            self._current_text = ""
+
+    def _pyttsx3_loop(self) -> None:
+        """Linux / RPi TTS via pyttsx3 + espeak."""
         try:
             import pyttsx3  # type: ignore
         except ImportError:
-            log.warning(
-                "[tts] pyttsx3 not installed — speech will be printed only"
-            )
+            log.warning("[tts] pyttsx3 not installed — speech will be printed only")
             self._print_only_loop()
             return
 
@@ -124,8 +152,7 @@ class Speaker:
             self._print_only_loop()
             return
 
-        # ── configure voice properties ────────────────────────────────────
-        engine.setProperty("rate",   TTS_RATE)
+        engine.setProperty("rate", TTS_RATE)
         engine.setProperty("volume", TTS_VOLUME)
 
         if TTS_VOICE is not None:
@@ -137,20 +164,15 @@ class Speaker:
             else:
                 log.warning("[tts] voice '%s' not found — using default", TTS_VOICE)
 
-        log.info(
-            "[tts] pyttsx3 ready  rate=%d  volume=%.2f",
-            TTS_RATE, TTS_VOLUME,
-        )
+        log.info("[tts] pyttsx3 ready  rate=%d  volume=%.2f", TTS_RATE, TTS_VOLUME)
 
         while True:
             try:
                 req = self._queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-
             if req.shutdown:
                 break
-
             log.info("[tts] speaking: '%s'", req.text)
             self._current_text = req.text
             engine.say(req.text)
@@ -171,6 +193,7 @@ class Speaker:
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _drain_queue(q: queue.Queue) -> None:
     """Remove all pending items from a queue without blocking."""

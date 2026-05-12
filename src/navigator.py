@@ -16,6 +16,7 @@ fully unit-testable.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional
 
@@ -26,10 +27,10 @@ from topo_map import TopoMap
 log = logging.getLogger(__name__)
 
 # ── Voice command keywords ────────────────────────────────────────────────────
-_CMD_DESCRIBE   = {"describe", "scene", "what", "see", "around", "surroundings"}
-_CMD_WHERE      = {"where", "location", "am", "route", "place"}
-_CMD_STOP       = {"stop", "quit", "exit", "off", "silence"}
-_CMD_HELP       = {"help", "commands", "what can you do"}
+_CMD_DESCRIBE = {"describe", "scene", "what", "see", "around", "surroundings"}
+_CMD_WHERE = {"where", "location", "am", "route", "place"}
+_CMD_STOP = {"stop", "quit", "exit", "off", "silence"}
+_CMD_HELP = {"help", "commands", "what can you do"}
 
 
 class Navigator:
@@ -47,8 +48,9 @@ class Navigator:
         self._topo = topo_map
         self._last_speech_t: float = 0.0
         self._last_urgent_t: float = 0.0
+        self._last_command_t: float = 0.0  # suppress urgent after a command
         self._speech_queue: list[tuple[str, bool]] = []  # (text, urgent)
-        self._consecutive_clear: int = 0   # frames with no centre obstacle
+        self._consecutive_clear: int = 0
         self._last_result: Optional[DetectionResult] = None
 
     # ── Main update — called every detection frame ────────────────────────
@@ -64,6 +66,10 @@ class Navigator:
         # ── 2. Urgent obstacles (close + centre) ──────────────────────
         urgent = result.urgent
         if urgent:
+            # Hold off if a command response was just queued (give it 3 s to
+            # be heard before resuming obstacle warnings).
+            if now - self._last_command_t < 3.0:
+                return
             # De-dup: only speak if not repeated within 1.5 s.
             if now - self._last_urgent_t >= 1.5:
                 phrase = _build_urgent_phrase(urgent)
@@ -79,7 +85,7 @@ class Navigator:
             else:
                 # Path clear — confirm occasionally, not every frame.
                 self._consecutive_clear += 1
-                if self._consecutive_clear % 30 == 0:   # ~every 3 s at 10 fps
+                if self._consecutive_clear % 30 == 0:  # ~every 3 s at 10 fps
                     self._enqueue("Path clear", urgent=False)
 
     # ── Voice command handler ─────────────────────────────────────────────
@@ -91,7 +97,9 @@ class Navigator:
         Args:
             text: Whisper-transcribed utterance, e.g. "describe the scene".
         """
-        words = set(text.lower().split())
+        # Strip punctuation so Whisper artefacts like "help." match "help".
+        clean = re.sub(r"[^\w\s]", "", text.lower())
+        words = set(clean.split())
         log.info("[nav] command received: '%s'", text)
 
         if words & _CMD_STOP:
@@ -109,14 +117,15 @@ class Navigator:
             self._enqueue(phrase, urgent=False)
 
         elif words & _CMD_HELP:
-            self._enqueue(
-                "Say: describe scene, where am I, or stop.", urgent=False
-            )
+            self._enqueue("Say: describe scene, where am I, or stop.", urgent=False)
 
         else:
             # Pass through to LLM / future intent parser.
             log.info("[nav] unrecognised command: '%s'", text)
             self._enqueue(f"I heard: {text}. Say help for commands.", urgent=False)
+
+        # Suppress urgent obstacle warnings for 3 s so the response is heard.
+        self._last_command_t = time.monotonic()
 
     # ── Speech queue ──────────────────────────────────────────────────────
 
@@ -141,6 +150,7 @@ class Navigator:
 
 # ── Phrase builders ───────────────────────────────────────────────────────────
 
+
 def _build_urgent_phrase(detections: list[Detection]) -> str:
     """Short, urgent phrase for very-close obstacles."""
     # Lead with the highest-priority detection.
@@ -157,9 +167,9 @@ def _build_normal_phrase(result: DetectionResult) -> str:
     Summarise the scene in 1–2 sentences.
     Prioritises centre obstacles, then mentions flanks.
     """
-    centre    = [d for d in result.by_priority if d.zone == Zone.CENTRE]
-    left      = [d for d in result.by_priority if d.zone == Zone.LEFT]
-    right     = [d for d in result.by_priority if d.zone == Zone.RIGHT]
+    centre = [d for d in result.by_priority if d.zone == Zone.CENTRE]
+    left = [d for d in result.by_priority if d.zone == Zone.LEFT]
+    right = [d for d in result.by_priority if d.zone == Zone.RIGHT]
 
     parts: list[str] = []
 

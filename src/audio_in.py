@@ -14,9 +14,9 @@ Callers receive completed utterances from an output queue:
     mic.stop()
 
 Simulation mode:
-    When SIMULATE=1 OR sounddevice is unavailable, the capture thread is
-    replaced by a keyboard input thread so the pipeline can be tested at
-    a terminal:  type a command and press Enter.
+    When sounddevice is unavailable or fails to open, the capture thread
+    falls back to keyboard input so the pipeline can be tested at a terminal.
+    A real USB/Bluetooth microphone is always preferred when detected.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from config import (
     MIC_DTYPE,
     MIC_SAMPLE_RATE,
     MIC_SILENCE_THRESH,
-    SIMULATE,
     WHISPER_MODEL,
 )
 
@@ -59,30 +58,27 @@ class Microphone:
     def __init__(self) -> None:
         self._utterance_queue: queue.Queue[str] = queue.Queue()
         self._pcm_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
-        self._stop_event  = threading.Event()
+        self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._whisper_model = None  # lazy load
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        """Start capture and STT threads."""
+        """Start capture and STT threads.
+
+        Always attempts the real microphone via sounddevice first — this works
+        on both macOS (desktop testing) and Raspberry Pi (production).
+        Keyboard fallback is only used when sounddevice is unavailable or
+        fails to open a stream.
+        """
         self._stop_event.clear()
 
-        if SIMULATE:
-            t_cap = threading.Thread(
-                target=self._keyboard_loop, name="mic-keyboard", daemon=True
-            )
-            self._threads = [t_cap]
-            log.info("[mic] simulation mode — type commands at the terminal")
-        else:
-            t_cap = threading.Thread(
-                target=self._capture_loop, name="mic-capture", daemon=True
-            )
-            t_stt = threading.Thread(
-                target=self._stt_loop, name="mic-stt", daemon=True
-            )
-            self._threads = [t_cap, t_stt]
+        t_cap = threading.Thread(
+            target=self._capture_loop, name="mic-capture", daemon=True
+        )
+        t_stt = threading.Thread(target=self._stt_loop, name="mic-stt", daemon=True)
+        self._threads = [t_cap, t_stt]
 
         for t in self._threads:
             t.start()
@@ -147,7 +143,8 @@ class Microphone:
                         pass  # drop oldest implicitly (STT is slower than capture)
 
         except Exception as exc:  # noqa: BLE001
-            log.error("[mic] capture error: %s", exc)
+            log.warning("[mic] capture failed (%s) — falling back to keyboard", exc)
+            self._keyboard_loop()
 
     # ── STT thread ────────────────────────────────────────────────────────
 
@@ -199,7 +196,7 @@ class Microphone:
                         result = model.transcribe(
                             audio,
                             language="en",
-                            fp16=False,   # fp16 not supported on CPU
+                            fp16=False,  # fp16 not supported on CPU
                         )
                         text: str = result["text"].strip()
                         if text:
@@ -225,6 +222,7 @@ class Microphone:
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _rms(block: np.ndarray) -> float:
     """Root-mean-square amplitude of a PCM block."""
