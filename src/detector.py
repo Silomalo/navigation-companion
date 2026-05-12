@@ -9,8 +9,9 @@ Provides:
   - Proximity estimation from bounding-box size.
   - A structured DetectionResult for the navigator to consume.
 
-The model is downloaded automatically on first run and cached to
-config.MODELS_DIR.  Subsequent starts load from the local cache.
+The model is downloaded automatically on first run, immediately exported
+to ONNX (2-3× CPU speedup), and cached to config.MODELS_DIR.
+Subsequent starts load the ONNX directly — no manual steps needed.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from config import (
     YOLO_IOU_THRESH,
     YOLO_MODEL_NAME,
     YOLO_MODEL_PATH,
+    YOLO_ONNX_PATH,
     ZONE_LEFT_EDGE,
     ZONE_RIGHT_EDGE,
 )
@@ -122,6 +124,33 @@ class DetectionResult:
         return vec
 
 
+# ── ONNX export helper ───────────────────────────────────────────────────────
+
+
+def _export_onnx() -> None:
+    """Export the .pt model to ONNX format (runs once, ~10 s).
+
+    Writes to YOLO_ONNX_PATH. Called automatically by Detector.load()
+    on first run so no manual step is ever needed.
+    """
+    from pathlib import Path as _Path
+
+    log.info("[detector] exporting to ONNX — one-time setup, please wait …")
+    pt_model = YOLO(str(YOLO_MODEL_PATH))
+    out = pt_model.export(
+        format="onnx",
+        imgsz=YOLO_IMG_SIZE,
+        simplify=True,  # fuse ops for faster CPU execution
+        dynamic=False,  # fixed batch=1 for embedded/RPi deployment
+        opset=17,
+    )
+    exported = _Path(str(out))
+    if exported.resolve() != YOLO_ONNX_PATH.resolve():
+        YOLO_ONNX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        exported.replace(YOLO_ONNX_PATH)
+    log.info("[detector] ONNX model ready → %s", YOLO_ONNX_PATH)
+
+
 # ── Detector class ────────────────────────────────────────────────────────────
 
 
@@ -140,14 +169,31 @@ class Detector:
         self._frame_count: int = 0
 
     def load(self) -> None:
-        """Load (or download) the YOLOv8n model weights."""
-        # Always pass the full path so Ultralytics downloads directly to
-        # data/models/ instead of the current working directory.
-        log.info(
-            "[detector] loading model: %s  (device=%s)", YOLO_MODEL_PATH, YOLO_DEVICE
-        )
-        self._model = YOLO(str(YOLO_MODEL_PATH))
-        self._model.to(YOLO_DEVICE)
+        """Download the .pt weights (if missing), auto-export to ONNX on first
+        run, then load the ONNX model for 2-3x faster CPU inference.
+
+        Flow on every startup:
+          1. If yolov8n.onnx exists  → load it directly (fast path).
+          2. If only yolov8n.pt exists → export to ONNX, then load ONNX.
+          3. If neither exists        → download .pt, export to ONNX, load ONNX.
+
+        See docs/model-improvements.md for tuning and custom-training details.
+        """
+        # ── Step 1: ensure the .pt weights are on disk ─────────────────────
+        if not YOLO_ONNX_PATH.exists():
+            if not YOLO_MODEL_PATH.exists():
+                log.info("[detector] downloading %s …", YOLO_MODEL_NAME)
+            YOLO(str(YOLO_MODEL_PATH))  # triggers download if missing
+
+            # ── Step 2: export to ONNX (runs once, ~10 s) ─────────────────
+            _export_onnx()
+
+        # ── Step 3: load the ONNX model ────────────────────────────────────
+        log.info("[detector] loading ONNX model")
+        # task='detect' suppresses the auto-guess warning.
+        # .to(device) is PyTorch-only and must NOT be called on ONNX models;
+        # onnxruntime selects the execution provider (CPU) automatically.
+        self._model = YOLO(str(YOLO_ONNX_PATH), task="detect")
         # Warm-up pass: avoids first-frame latency spike.
         dummy = np.zeros((YOLO_IMG_SIZE, YOLO_IMG_SIZE, 3), dtype=np.uint8)
         self._model(dummy, verbose=False)

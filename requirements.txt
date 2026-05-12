@@ -16,5 +16,9 @@ pyttsx3>=2.90               # offline TTS → espeak on Linux, SAPI5 on Windows
 # Uncomment only if you are pip-installing into a clean virtualenv on the RPi:
 # picamera2>=0.3.19
 
+# ── ONNX inference (auto-export on first run for 2-3× CPU speedup) ───────────
+onnx>=1.14.0                # model export
+onnxruntime>=1.16.0         # CPU inference runtime (RPi + macOS)
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 # (all standard-library or already pulled in by ultralytics/whisper)

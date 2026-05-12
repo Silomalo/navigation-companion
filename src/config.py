@@ -41,6 +41,8 @@ YOLO_CONF_THRESH: float = 0.45  # minimum detection confidence
 YOLO_IOU_THRESH: float = 0.45  # NMS IoU threshold
 YOLO_IMG_SIZE: int = 640  # inference resolution (square)
 YOLO_DEVICE: str = "cpu"  # "cpu" on RPi; "cuda" if GPU available
+# ONNX model (exported for ~2–3× CPU speedup). Auto-used by Detector if present.
+YOLO_ONNX_PATH: Path = MODELS_DIR / "yolov8n.onnx"
 
 # ── Obstacle zones (fraction of frame width) ──────────────────────────────────
 # The frame is divided into 3 horizontal columns.
@@ -92,28 +94,51 @@ TOPO_RECORD_INTERVAL_S: float = 5.0
 # Keys are COCO class names (YOLOv8 default labels).
 # Values are (nav_label, priority) where priority 1=urgent, 2=normal, 3=info.
 OBSTACLE_MAP: dict[str, tuple[str, int]] = {
-    # --- Dynamic / moving ---
+    # ── Moving people ──────────────────────────────────────────────────────
     "person": ("person", 1),
+    # ── Vehicles ───────────────────────────────────────────────────────────
     "bicycle": ("bicycle", 1),
     "car": ("car", 1),
     "motorcycle": ("motorcycle", 1),
     "bus": ("bus", 1),
     "truck": ("truck", 1),
-    # --- Static path hazards ---
-    "chair": ("chair", 2),
+    "train": ("train", 1),
+    # ── Animals — large / dangerous (priority 1) ───────────────────────────
+    "dog": ("dog", 1),
+    "horse": ("horse", 1),
+    "cow": ("cow", 1),
+    "sheep": ("sheep", 1),
+    "elephant": ("elephant", 1),
+    "bear": ("bear", 1),
+    "zebra": ("zebra", 1),
+    "giraffe": ("giraffe", 1),
+    # ── Animals — small (priority 2) ───────────────────────────────────────
+    "cat": ("cat", 2),
+    "bird": ("bird", 2),
+    # ── Road signs & signals ───────────────────────────────────────────────
+    "traffic light": ("traffic light", 2),
+    "stop sign": ("stop sign", 2),
+    "parking meter": ("parking meter", 3),
+    # ── Static path hazards ────────────────────────────────────────────────
+    "fire hydrant": ("fire hydrant", 2),
     "bench": ("bench", 2),
+    "chair": ("chair", 2),
     "dining table": ("table", 2),
     "potted plant": ("plant", 2),
-    "fire hydrant": ("fire hydrant", 2),
-    "parking meter": ("parking meter", 2),
-    "stop sign": ("stop sign", 2),
-    "traffic light": ("traffic light", 2),
-    # --- Elevation hazards ---
-    "stairs": ("stairs", 1),  # custom label (not COCO default)
-    # --- Indoor furniture ---
+    "suitcase": ("suitcase", 2),
+    "skateboard": ("skateboard", 2),
+    "sports ball": ("ball", 2),
+    # ── Elevation hazards ──────────────────────────────────────────────────
+    # NOTE: "stairs" is a custom label — not in COCO-80. Requires a
+    # fine-tuned or custom-trained model to actually detect.
+    # See docs/model-improvements.md for training instructions.
+    "stairs": ("stairs", 1),
+    # ── Indoor / info ──────────────────────────────────────────────────────
     "couch": ("couch", 2),
     "bed": ("bed", 2),
+    "door": ("door", 2),
     "toilet": ("toilet", 3),
     "refrigerator": ("refrigerator", 3),
-    "door": ("door", 2),  # custom label
+    "umbrella": ("umbrella", 3),
+    "backpack": ("backpack", 3),
 }
