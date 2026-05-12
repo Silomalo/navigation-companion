@@ -237,7 +237,7 @@ def run_simulation(
 
     # ── Subsystems ────────────────────────────────────────────────────────
     detector = Detector()
-    log.info("Loading YOLOv8n …")
+    log.info("Loading YOLO11n …")
     detector.load()
 
     topo = TopoMap()

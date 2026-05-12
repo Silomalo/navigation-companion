@@ -34,15 +34,15 @@ SIM_CAMERA_INDEX: int = 0
 
 # ── YOLOv8 Object Detection ────────────────────────────────────────────────────
 # Model variant: yolov8n (nano, 6 MB) is ideal for RPi 5 (~15 fps).
-# Options: yolov8n, yolov8s, yolov8m  (larger = more accurate, slower)
-YOLO_MODEL_NAME: str = "yolov8n.pt"
+# Options: yolo11n, yolo11s, yolo11m  (larger = more accurate, slower)
+YOLO_MODEL_NAME: str = "yolo11n.pt"
 YOLO_MODEL_PATH: Path = MODELS_DIR / YOLO_MODEL_NAME
 YOLO_CONF_THRESH: float = 0.45  # minimum detection confidence
 YOLO_IOU_THRESH: float = 0.45  # NMS IoU threshold
 YOLO_IMG_SIZE: int = 640  # inference resolution (square)
 YOLO_DEVICE: str = "cpu"  # "cpu" on RPi; "cuda" if GPU available
 # ONNX model (exported for ~2–3× CPU speedup). Auto-used by Detector if present.
-YOLO_ONNX_PATH: Path = MODELS_DIR / "yolov8n.onnx"
+YOLO_ONNX_PATH: Path = MODELS_DIR / "yolo11n.onnx"
 
 # ── Obstacle zones (fraction of frame width) ──────────────────────────────────
 # The frame is divided into 3 horizontal columns.

@@ -3,12 +3,12 @@
 > Referenced by: `src/detector.py` → `Detector.load()`
 > Referenced by: `src/config.py` → `OBSTACLE_MAP`
 
-This document covers how to improve the speed and accuracy of the YOLOv8n
-object detection model used in the Navigation Companion.
+This document covers how to improve the speed and accuracy of the YOLO11n
+object detection model and faster-whisper STT used in the Navigation Companion.
 
 ---
 
-## Current Capabilities (YOLOv8n + COCO-80)
+## Current Capabilities (YOLO11n + COCO-80)
 
 | Target | COCO status | Quality |
 |---|---|---|
@@ -21,53 +21,75 @@ object detection model used in the Navigation Companion.
 | Suitcases / skateboards / balls | ✅ mapped as path hazards | Moderate |
 | **Staircases** | ❌ not in COCO | **Needs custom training** |
 | **Stones / pebbles on path** | ❌ not in COCO | **Needs custom training** |
-| **Road surface / tarmac** | ❌ requires segmentation | **Needs YOLOv8-seg** |
+| **Road surface / tarmac** | ❌ requires segmentation | **Needs YOLO11-seg** |
 | **Road signs (general)** | ⚠️ stop sign + traffic light only | Partial — needs training |
 | **Children crawling** | ⚠️ detected as `person`, no pose | **Needs pose model** |
 | **Cycle drivers** | ⚠️ `person` + `bicycle` separate | No combined label |
 
 ---
 
-## 1 — Speed: ONNX (Already Active ✅)
+## 1 — Detection Speed: YOLO11n + ONNX (Already Active ✅)
 
-ONNX export is now **fully automatic**. On first run `Detector.load()`:
+Both YOLO11n and ONNX export are **fully automatic**. On first run `Detector.load()`:
 
-1. Downloads `yolov8n.pt` if not cached
-2. Exports it to `data/models/yolov8n.onnx` (~10 s, one-time)
+1. Downloads `yolo11n.pt` if not cached
+2. Exports it to `data/models/yolo11n.onnx` (~1 s, one-time)
 3. Loads the ONNX model on every subsequent run
 
-No manual steps are required. Just run `pip install -r requirements.txt` and start.
+No manual steps required — just `pip install -r requirements.txt` and run.
 
-| Model | RPi 5 | macOS (Intel) |
-|---|---|---|
-| `yolov8n.pt` PyTorch | ~15 fps | ~30 fps |
-| `yolov8n.onnx` **active** | ~28 fps | ~55 fps |
+| Model | Size | mAP50 | RPi 5 (ONNX) |
+|---|---|---|---|
+| `yolov8n.onnx` (old) | 12 MB | 37.3 | ~28 fps |
+| `yolo11n.onnx` **active** | 10 MB | 39.5 | ~30 fps |
+
+YOLO11n uses an improved C3k2 backbone — **+2.2 mAP and slightly faster** than YOLOv8n at the same model size.
 
 ---
 
-## 2 — Accuracy: Upgrade Model Variant
+## 2 — STT Speed: faster-whisper (Already Active ✅)
 
-Change `YOLO_MODEL_NAME` and `YOLO_ONNX_PATH` in `src/config.py`:
+`faster-whisper` replaces `openai-whisper` and uses CTranslate2 with INT8
+quantisation for ~4× faster transcription on CPU.
+
+| Backend | RPi 5 latency (tiny) | Memory | Accuracy |
+|---|---|---|---|
+| `openai-whisper` (old) | ~800 ms | ~400 MB | Baseline |
+| `faster-whisper` **active** | **~200 ms** | ~150 MB | Identical |
+
+Model is downloaded automatically from Hugging Face Hub on first use.
+Change `WHISPER_MODEL` in `src/config.py` for better accuracy:
+
+| Model | Size | RPi 5 latency | Best for |
+|---|---|---|---|
+| `tiny` | 39 MB | ~200 ms | Current — real-time on RPi |
+| `base` | 74 MB | ~400 ms | Better accuracy, still fast |
+| `small` | 244 MB | ~1.2 s | High accuracy environments |
+
+---
+
+## 3 — Accuracy: Upgrade YOLO Model Variant
+
+Change `YOLO_MODEL_NAME` and `YOLO_ONNX_PATH` in `src/config.py`.
+ONNX export happens automatically on the next run.
 
 | Model | Size | mAP50 | RPi 5 (ONNX) | Best for |
 |---|---|---|---|---|
-| `yolov8n` | 6 MB | 37.3 | ~28 fps | Current — real-time on RPi |
-| `yolov8s` | 22 MB | 44.9 | ~15 fps | Balanced accuracy / speed |
-| `yolov8m` | 52 MB | 50.2 | ~8 fps | High accuracy, slower |
+| `yolo11n` | 5.4 MB | 39.5 | ~30 fps | **Current** — real-time on RPi |
+| `yolo11s` | 21 MB | 47.0 | ~16 fps | Balanced accuracy / speed |
+| `yolo11m` | 68 MB | 51.5 | ~8 fps | High accuracy, slower |
 
-**Recommended next step:** switch to `yolov8s` — +7.6 mAP, still real-time via ONNX:
+**Recommended next step:** switch to `yolo11s` — +7.5 mAP, still real-time via ONNX:
 
 ```python
 # src/config.py
-YOLO_MODEL_NAME: str = "yolov8s.pt"
-YOLO_ONNX_PATH:  Path = MODELS_DIR / "yolov8s.onnx"
+YOLO_MODEL_NAME: str = "yolo11s.pt"
+YOLO_ONNX_PATH:  Path = MODELS_DIR / "yolo11s.onnx"
 ```
-
-The ONNX export happens automatically on the next run.
 
 ---
 
-## 3 — Staircases (Custom Training)
+## 4 — Staircases (Custom Training)
 
 Stairs are the highest-priority missing class. `"stairs"` exists in `OBSTACLE_MAP`
 but the base COCO model never produces that label — it requires fine-tuning.
@@ -89,28 +111,28 @@ project = rf.workspace().project("stairs-detection")
 dataset = project.version(1).download("yolov8", location="data/datasets/stairs")
 EOF
 
-# 2. Fine-tune from yolov8n checkpoint (transfer learning — fast, ~1 h on GPU)
+# 2. Fine-tune from yolo11n checkpoint (transfer learning — ~1 h on free Colab GPU)
 yolo detect train \
-  model=data/models/yolov8n.pt \
+  model=data/models/yolo11n.pt \
   data=data/datasets/stairs/data.yaml \
   epochs=50 \
   imgsz=640 \
   project=data/runs \
   name=stairs_ft
 
-# 3. Move best weights and update config
-cp data/runs/stairs_ft/weights/best.pt data/models/yolov8n_custom.pt
+# 3. Move best weights
+cp data/runs/stairs_ft/weights/best.pt data/models/yolo11n_custom.pt
 ```
 
 ```python
-# src/config.py
-YOLO_MODEL_NAME: str = "yolov8n_custom.pt"
-YOLO_ONNX_PATH:  Path = MODELS_DIR / "yolov8n_custom.onnx"  # auto-exported on next run
+# src/config.py  — ONNX auto-exported on next run
+YOLO_MODEL_NAME: str = "yolo11n_custom.pt"
+YOLO_ONNX_PATH:  Path = MODELS_DIR / "yolo11n_custom.onnx"
 ```
 
 ---
 
-## 4 — Stones & Pebbles on Path (Custom Dataset)
+## 5 — Stones & Pebbles on Path (Custom Dataset)
 
 No public dataset covers small ground-level hazards. You must collect and
 annotate your own data from the target environment.
@@ -139,11 +161,11 @@ pothole        # road defect
 ```
 
 ### Training
-Same `yolo detect train` command as Section 3, pointing at your dataset.
+Same `yolo detect train` command as Section 4, pointing at your dataset.
 
 ---
 
-## 5 — Road Signs (Comprehensive)
+## 6 — Road Signs (Comprehensive)
 
 COCO covers only `stop sign` and `traffic light`. For full coverage:
 
@@ -155,22 +177,22 @@ COCO covers only `stop sign` and `traffic light`. For full coverage:
 | Roboflow Road Signs | Mixed | Global | https://universe.roboflow.com/search?q=road+signs |
 
 ### Approach
-Fine-tune `yolov8s.pt` on road signs. Run two models in parallel — obstacles
+Fine-tune `yolo11s.pt` on road signs. Run two models in parallel — obstacles
 (model A) and signs (model B) — then merge `DetectionResult` lists before
 passing to the navigator.
 
 ---
 
-## 6 — Children Crawling (Pose Estimation)
+## 7 — Children Crawling (Pose Estimation)
 
 A crawling child has the same bounding-box label (`person`) as a standing adult.
 Detection alone cannot distinguish them — pose estimation is required.
 
-### Solution: YOLOv8-Pose
+### Solution: YOLO11-Pose
 
 ```python
 from ultralytics import YOLO
-pose_model = YOLO("yolov8n-pose.pt")   # auto-downloads (~7 MB)
+pose_model = YOLO("yolo11n-pose.pt")   # auto-downloads (~7 MB)
 results = pose_model(frame)
 # keypoints[15] = left ankle,  keypoints[16] = right ankle
 # keypoints[11] = left hip,    keypoints[12] = right hip
@@ -179,21 +201,21 @@ results = pose_model(frame)
 
 Add to `src/config.py`:
 ```python
-YOLO_POSE_MODEL_PATH: Path = MODELS_DIR / "yolov8n-pose.pt"
+YOLO_POSE_MODEL_PATH: Path = MODELS_DIR / "yolo11n-pose.pt"
 POSE_CRAWL_THRESH: float = 0.15   # ankle-to-hip vertical normalised ratio
 ```
 
 ---
 
-## 7 — Road Surface / Tarmac
+## 8 — Road Surface / Tarmac
 
 Object detection draws bounding boxes — it cannot label every pixel.
 Road surface requires **semantic segmentation**.
 
-### Solution: YOLOv8-Seg
+### Solution: YOLO11-Seg
 
 ```bash
-python -c "from ultralytics import YOLO; YOLO('yolov8n-seg.pt')"
+python -c "from ultralytics import YOLO; YOLO('yolo11n-seg.pt')"
 ```
 
 The segmentation mask identifies driveable surface vs. obstacles and can
@@ -201,13 +223,14 @@ feed into a path-planning or obstacle-avoidance module.
 
 ---
 
-## 8 — Upgrade Path
+## 9 — Upgrade Path
 
 ```
-Phase 1 ✅ DONE     ONNX auto-export        2–3× speed, zero effort
-Phase 2  (week 1)   Switch to yolov8s       +7 mAP, still real-time via ONNX
-Phase 3  (week 2–4) Fine-tune + stairs      actual staircase detection
-Phase 4  (month 2)  Custom pebble dataset   small ground-hazard detection
-Phase 5  (month 3)  Add pose model          crawling child detection
-Phase 6  (month 4)  Road sign dataset       comprehensive sign recognition
+Phase 1 ✅ DONE     ONNX auto-export           2–3× detection speed, zero effort
+Phase 2 ✅ DONE     YOLO11n + faster-whisper   +2.2 mAP, 4× faster STT
+Phase 3  (week 1)   Switch to yolo11s          +7.5 mAP, still real-time via ONNX
+Phase 4  (week 2–4) Fine-tune + stairs         actual staircase detection
+Phase 5  (month 2)  Custom pebble dataset      small ground-hazard detection
+Phase 6  (month 3)  Add pose model             crawling child detection
+Phase 7  (month 4)  Road sign dataset          comprehensive sign recognition
 ```

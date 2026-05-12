@@ -1,9 +1,9 @@
 # Visually Impaired Navigation Assistant
 
 A wearable, fully-offline navigation aid built on Raspberry Pi 5. A chest-mounted
-camera streams to an on-device YOLOv8n model that detects obstacles and speaks
+camera streams to an on-device YOLO11n model that detects obstacles and speaks
 navigation instructions through an earphone in real time. The user can issue voice
-commands (Whisper STT) and the device learns familiar routes using a topological map.
+commands (faster-whisper STT) and the device learns familiar routes using a topological map.
 
 ---
 
@@ -16,7 +16,7 @@ commands (Whisper STT) and the device learns familiar routes using a topological
 │  Pi Camera ──► camera.py                                    │
 │                    │  BGR frames @ 10 fps                    │
 │                    ▼                                         │
-│             detector.py  ◄── YOLOv8n ONNX (12 MB, COCO-80) │
+│             detector.py  ◄── YOLO11n ONNX (10 MB, COCO-80) │
 │                    │  DetectionResult (zone + proximity)     │
 │                    ▼                                         │
 │             navigator.py ◄── topo_map.py (route learning)   │
@@ -24,7 +24,7 @@ commands (Whisper STT) and the device learns familiar routes using a topological
 │                    ▼                                         │
 │             audio_out.py ──► earphone (espeak on RPi)        │
 │                                                              │
-│  Microphone ──► audio_in.py ──► Whisper STT ──► nav cmd     │
+│  Microphone ──► audio_in.py ──► faster-whisper ──► nav cmd  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -50,13 +50,13 @@ All models run **locally — no internet required after first download**.
 
 | Model | Size | Speed on RPi 5 | Purpose |
 |---|---|---|---|
-| YOLOv8n (**ONNX**) | 12 MB | ~28 fps | Obstacle detection — auto-exported on first run |
-| Whisper tiny | 39 MB | ~0.3× real-time | Voice command recognition |
+| YOLO11n (**ONNX**) | 10 MB | ~30 fps | Obstacle detection — auto-exported on first run |
+| faster-whisper tiny | 39 MB | ~200 ms / utterance | Voice command recognition (4× faster than Whisper) |
 | espeak-ng (RPi) / `say` (macOS) | built-in | real-time | Text-to-speech navigation |
 
-> **ONNX is automatic.** On first run, `Detector.load()` downloads `yolov8n.pt`,
-> exports it to `yolov8n.onnx` (~10 s, one-time), and loads the faster ONNX model.
-> No manual steps needed.
+> **Everything is automatic.** On first run, `Detector.load()` downloads `yolo11n.pt`,
+> exports `yolo11n.onnx` in ~1 s, and loads it. The faster-whisper model downloads
+> from Hugging Face on first mic use. No manual steps needed.
 
 ---
 
@@ -95,8 +95,11 @@ SIMULATE=1 python simulate.py --video path/to/street.mp4
 SIMULATE=1 python simulate.py --synthetic
 ```
 
-**On first run** the detector downloads `yolov8n.pt` and exports `yolov8n.onnx`
-automatically. Subsequent starts are instant.
+**On first run:**
+1. `yolo11n.pt` downloads and is exported to `yolo11n.onnx` automatically (~1 s)
+2. faster-whisper `tiny` model downloads from Hugging Face on first voice command
+
+Subsequent starts are instant — both models are cached locally.
 
 **Simulation window keyboard shortcuts:**
 
@@ -107,8 +110,8 @@ automatically. Subsequent starts are instant.
 | `H` | Help |
 | `Q` / `ESC` | Quit |
 
-Voice commands also work if a microphone is detected — speak naturally into
-the oraimo or any 16 kHz USB/Bluetooth mic.
+Voice commands work with any connected microphone — speak naturally, punctuation
+and filler words are ignored by the command parser.
 
 ### Raspberry Pi 5
 
@@ -140,7 +143,7 @@ All tunable parameters live in one file — no magic numbers elsewhere.
 
 | Setting | Default | Effect |
 |---|---|---|
-| `YOLO_MODEL_NAME` | `yolov8n.pt` | Swap to `yolov8s.pt` for +7 mAP |
+| `YOLO_MODEL_NAME` | `yolo11n.pt` | Swap to `yolo11s.pt` for +7.5 mAP |
 | `DETECT_FPS` | `10` | Lower → less CPU; higher → more responsive |
 | `YOLO_CONF_THRESH` | `0.45` | Raise to reduce false positives |
 | `DIST_CLOSE_THRESH` | `0.55` | Fraction of frame height = "very close" |
@@ -154,7 +157,7 @@ All tunable parameters live in one file — no magic numbers elsewhere.
 
 ## Voice Commands
 
-Commands are matched by keyword — punctuation and filler words are ignored,
+Commands are matched by keyword — punctuation and filler words are stripped,
 so natural speech like *"can you describe the scene?"* works fine.
 
 | Say | Response |
@@ -169,7 +172,7 @@ so natural speech like *"can you describe the scene?"* works fine.
 ## Topological Map
 
 The map is stored in `data/maps/routes.json` and persists across restarts.
-Every 5 seconds the system takes a visual fingerprint (YOLOv8 class-confidence
+Every 5 seconds the system takes a visual fingerprint (YOLO11n class-confidence
 histogram) and either matches it to a known node or creates a new one. Edges
 are recorded between consecutive nodes to capture route order.
 
@@ -189,8 +192,9 @@ rm data/maps/routes.json
 |---|---|---|
 | Camera | OpenCV webcam (`cv2.VideoCapture`) | `picamera2` |
 | TTS | macOS built-in `say` command | `pyttsx3` + `espeak-ng` |
+| STT | faster-whisper (CTranslate2 + int8) | faster-whisper (CTranslate2 + int8) |
 | Microphone | Any USB / Bluetooth mic via `sounddevice` | USB mic via `sounddevice` |
-| ONNX inference | `onnxruntime` CPU | `onnxruntime` CPU |
+| Detection | YOLO11n ONNX via `onnxruntime` CPU | YOLO11n ONNX via `onnxruntime` CPU |
 
 > **Why different TTS on macOS?** `pyttsx3` uses `NSSpeechSynthesizer` which
 > requires the AppKit main run loop and hangs silently in a background thread.
@@ -205,8 +209,8 @@ src/
   main.py           — RPi entry point, main perception-action loop
   config.py         — all constants (one place to change everything)
   camera.py         — Pi Camera / OpenCV capture abstraction
-  detector.py       — YOLOv8n ONNX inference + navigation postprocessing
-  audio_in.py       — microphone capture + Whisper STT (real mic first, keyboard fallback)
+  detector.py       — YOLO11n ONNX inference + navigation postprocessing
+  audio_in.py       — microphone capture + faster-whisper STT
   audio_out.py      — TTS speaker (macOS `say` / Linux espeak)
   navigator.py      — navigation logic + voice command parser
   topo_map.py       — topological route learning + persistence
@@ -218,6 +222,6 @@ deploy/
   install.sh
   nav-assistant.service
 data/
-  models/           — yolov8n.pt + yolov8n.onnx (auto-generated)
-  maps/             — routes.json (learned topological map)
+  models/           — yolo11n.pt + yolo11n.onnx (auto-generated on first run)
+  maps/             — routes.json (learned topological map, persists across restarts)
 ```

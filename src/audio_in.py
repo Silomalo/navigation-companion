@@ -150,13 +150,14 @@ class Microphone:
 
     def _stt_loop(self) -> None:
         """
-        Consume PCM blocks, detect speech with VAD, transcribe with Whisper.
+        Consume PCM blocks, detect speech with VAD, transcribe with
+        faster-whisper (CTranslate2 + int8 — ~4× faster than openai-whisper).
         """
-        import whisper as _whisper  # type: ignore
+        from faster_whisper import WhisperModel  # type: ignore
 
-        log.info("[mic] loading Whisper '%s' model …", WHISPER_MODEL)
-        model = _whisper.load_model(WHISPER_MODEL)
-        log.info("[mic] Whisper ready")
+        log.info("[mic] loading faster-whisper '%s' (int8 CPU) …", WHISPER_MODEL)
+        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        log.info("[mic] faster-whisper ready")
 
         collecting: list[np.ndarray] = []
         last_voice_time: float = 0.0
@@ -193,12 +194,13 @@ class Microphone:
                             "[mic] transcribing %.1f s of audio …",
                             len(audio) / MIC_SAMPLE_RATE,
                         )
-                        result = model.transcribe(
+                        # faster-whisper returns a generator of segments.
+                        segments, _ = model.transcribe(
                             audio,
                             language="en",
-                            fp16=False,  # fp16 not supported on CPU
+                            beam_size=5,
                         )
-                        text: str = result["text"].strip()
+                        text: str = " ".join(s.text for s in segments).strip()
                         if text:
                             log.info("[mic] recognised: '%s'", text)
                             self._utterance_queue.put(text)
