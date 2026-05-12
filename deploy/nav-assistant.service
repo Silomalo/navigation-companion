@@ -1,0 +1,28 @@
+[Unit]
+Description=Visually Impaired Navigation Assistant (Python)
+After=network.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/nav-assistant
+
+# Activate virtualenv and run.
+ExecStart=/home/pi/nav-assistant/venv/bin/python src/main.py
+
+Environment=PYTHONUNBUFFERED=1
+Environment=RUST_LOG=info
+
+Restart=on-failure
+RestartSec=5s
+
+# Allow access to camera and audio devices.
+SupplementaryGroups=video audio
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nav-assistant
+
+[Install]
+WantedBy=multi-user.target

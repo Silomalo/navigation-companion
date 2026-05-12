@@ -1,0 +1,13 @@
+{
+  "id": "ceb300d5-1047-45d9-9272-154ef75059f7",
+  "name": "Chest Mounted Navigation Companion",
+  "path": "Chest Mounted Navigation Companion",
+  "board": "arduino",
+  "boardId": "arduino-uno",
+  "boardFqbn": "arduino-uno",
+  "createdAt": 1778430424008,
+  "updatedAt": 1778563917394,
+  "schemaVersion": 1,
+  "exportedAt": "2026-05-12T07:42:09.456Z",
+  "exportedBy": "tinkered-app/1.0"
+}

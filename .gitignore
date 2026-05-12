@@ -1,0 +1,47 @@
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# ── ML model weights (auto-downloaded) ───────────────────────────────────────
+data/models/
+yolov8n.pt
+*.pt
+*.onnx
+*.engine
+
+# ── Ultralytics inference output (created automatically on first run) ─────────
+runs/
+
+# ── Topological map data (user-specific, generated at runtime) ────────────────
+data/maps/
+
+# ── Whisper model cache ───────────────────────────────────────────────────────
+~/.cache/whisper/
+
+# ── Logs & debug output ───────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Environment variables ─────────────────────────────────────────────────────
+.env
+.env.*

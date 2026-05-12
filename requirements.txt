@@ -1,0 +1,20 @@
+# ── Core ──────────────────────────────────────────────────────────────────────
+# Computer vision + detection
+ultralytics>=8.2.0          # YOLOv8n pretrained model (auto-downloads weights)
+opencv-python>=4.9.0        # camera capture, image processing, simulation window
+numpy>=1.26.0
+
+# ── Speech-to-Text ────────────────────────────────────────────────────────────
+openai-whisper>=20240930    # local Whisper (tiny model = 39 MB, runs on RPi 5)
+sounddevice>=0.4.6          # cross-platform ALSA/CoreAudio microphone capture
+
+# ── Text-to-Speech ────────────────────────────────────────────────────────────
+pyttsx3>=2.90               # offline TTS → espeak on Linux, SAPI5 on Windows
+
+# ── Raspberry Pi camera (hardware only) ───────────────────────────────────────
+# picamera2 is pre-installed on Raspberry Pi OS Bookworm.
+# Uncomment only if you are pip-installing into a clean virtualenv on the RPi:
+# picamera2>=0.3.19
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+# (all standard-library or already pulled in by ultralytics/whisper)
