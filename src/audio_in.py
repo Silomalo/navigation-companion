@@ -42,9 +42,7 @@ from config import (
 log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-# Collect this many seconds of audio before attempting a transcription.
-_SPEECH_COLLECT_S: float = 2.5
-# After _SPEECH_COLLECT_S of silence, consider the utterance finished.
+# After this many seconds of silence, consider the utterance finished.
 _SILENCE_TIMEOUT_S: float = 1.2
 
 
@@ -60,7 +58,7 @@ class Microphone:
         self._pcm_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._whisper_model = None  # lazy load
+        self._stt_available = False
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -153,10 +151,19 @@ class Microphone:
         Consume PCM blocks, detect speech with VAD, transcribe with
         faster-whisper (CTranslate2 + int8 — ~4× faster than openai-whisper).
         """
-        from faster_whisper import WhisperModel  # type: ignore
+        try:
+            from faster_whisper import WhisperModel  # type: ignore
+        except ImportError:
+            log.error("[mic] faster-whisper is not installed — speech recognition disabled")
+            return
 
         log.info("[mic] loading faster-whisper '%s' (int8 CPU) …", WHISPER_MODEL)
-        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        try:
+            model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        except Exception as exc:  # noqa: BLE001
+            log.error("[mic] faster-whisper load failed: %s", exc)
+            return
+        self._stt_available = True
         log.info("[mic] faster-whisper ready")
 
         collecting: list[np.ndarray] = []
@@ -195,11 +202,15 @@ class Microphone:
                             len(audio) / MIC_SAMPLE_RATE,
                         )
                         # faster-whisper returns a generator of segments.
-                        segments, _ = model.transcribe(
-                            audio,
-                            language="en",
-                            beam_size=5,
-                        )
+                        try:
+                            segments, _ = model.transcribe(
+                                audio,
+                                language="en",
+                                beam_size=5,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            log.warning("[mic] transcription failed: %s", exc)
+                            continue
                         text: str = " ".join(s.text for s in segments).strip()
                         if text:
                             log.info("[mic] recognised: '%s'", text)

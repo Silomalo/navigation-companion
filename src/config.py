@@ -27,13 +27,13 @@ CAMERA_WIDTH: int = 1280
 CAMERA_HEIGHT: int = 720
 CAMERA_FPS: int = 30  # capture FPS from hardware
 DETECT_FPS: int = 10  # inference FPS (sub-sample to save CPU)
-CAMERA_FORMAT: str = "MJPEG"  # picamera2 format
+CAMERA_FORMAT: str = "BGR888"  # picamera2 output format for OpenCV/YOLO
 
 # Simulation: index of the OpenCV VideoCapture source (0 = default webcam).
 SIM_CAMERA_INDEX: int = 0
 
-# ── YOLOv8 Object Detection ────────────────────────────────────────────────────
-# Model variant: yolov8n (nano, 6 MB) is ideal for RPi 5 (~15 fps).
+# ── YOLO Object Detection ─────────────────────────────────────────────────────
+# Model variant: yolo11n (nano, 5.4 MB) is ideal for RPi 5 (~30 fps via ONNX).
 # Options: yolo11n, yolo11s, yolo11m  (larger = more accurate, slower)
 YOLO_MODEL_NAME: str = "yolo11n.pt"
 YOLO_MODEL_PATH: Path = MODELS_DIR / YOLO_MODEL_NAME
@@ -42,7 +42,7 @@ YOLO_IOU_THRESH: float = 0.45  # NMS IoU threshold
 YOLO_IMG_SIZE: int = 640  # inference resolution (square)
 YOLO_DEVICE: str = "cpu"  # "cpu" on RPi; "cuda" if GPU available
 # ONNX model (exported for ~2–3× CPU speedup). Auto-used by Detector if present.
-YOLO_ONNX_PATH: Path = MODELS_DIR / "yolo11n.onnx"
+YOLO_ONNX_PATH: Path = MODELS_DIR / f"{YOLO_MODEL_PATH.stem}.onnx"
 
 # ── Obstacle zones (fraction of frame width) ──────────────────────────────────
 # The frame is divided into 3 horizontal columns.
@@ -60,9 +60,6 @@ DIST_MEDIUM_THRESH: float = 0.30  # bbox_h > this → "ahead"
 # Minimum seconds between two spoken navigation instructions.
 # Prevents audio spam while the user is walking.
 FEEDBACK_MIN_INTERVAL_S: float = 2.5
-
-# Urgency thresholds: if an obstacle is this close AND in centre, say it immediately.
-URGENT_CLOSE_FRACTION: float = 0.55  # same as DIST_CLOSE_THRESH
 
 # ── Microphone / Speech-to-Text ───────────────────────────────────────────────
 MIC_SAMPLE_RATE: int = 16_000  # Hz — Whisper requires 16 kHz

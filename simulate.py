@@ -6,7 +6,7 @@ visualisation window.  No Raspberry Pi hardware needed — just a webcam
 or a video file.
 
 Features:
-  - Live YOLOv8n bounding boxes with colour-coded zones
+  - Live YOLO bounding boxes with colour-coded zones
   - Obstacle proximity bars on the side panel
   - Topological map node counter
   - Live TTS speech transcript overlay

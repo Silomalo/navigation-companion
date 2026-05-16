@@ -25,18 +25,21 @@ pip install --upgrade pip wheel
 pip install -r requirements.txt
 
 echo ""
-echo "[2/4] Downloading YOLOv8n weights …"
+echo "[2/4] Preparing YOLO11n ONNX model …"
 python - <<'EOF'
-from ultralytics import YOLO
-YOLO("yolov8n.pt")   # downloads to ~/.cache/ultralytics/
-print("YOLOv8n ready")
+import sys
+sys.path.insert(0, "src")
+from detector import Detector
+
+Detector().load()
+print("YOLO11n ONNX ready")
 EOF
 
 echo "[2/4] Downloading Whisper tiny weights …"
 python - <<'EOF'
-import whisper
-whisper.load_model("tiny")
-print("Whisper tiny ready")
+from faster_whisper import WhisperModel
+WhisperModel("tiny", device="cpu", compute_type="int8")
+print("faster-whisper tiny ready")
 EOF
 
 # ── 3. Systemd service ────────────────────────────────────────────────────────

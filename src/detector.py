@@ -1,7 +1,7 @@
 """
-detector.py — YOLOv8n obstacle detection and scene understanding.
+detector.py — YOLO obstacle detection and scene understanding.
 
-Loads the ultralytics YOLOv8n pretrained model (COCO, 80 classes).
+Loads the configured Ultralytics YOLO pretrained model (COCO, 80 classes).
 Provides:
   - Per-frame detection with bounding boxes and confidence scores.
   - Classification of detections into navigation-relevant categories.
@@ -156,7 +156,7 @@ def _export_onnx() -> None:
 
 class Detector:
     """
-    Wraps a YOLOv8n model with navigation-specific postprocessing.
+    Wraps a YOLO model with navigation-specific postprocessing.
 
     Usage:
         det = Detector()
@@ -173,8 +173,8 @@ class Detector:
         run, then load the ONNX model for 2-3x faster CPU inference.
 
         Flow on every startup:
-          1. If yolov8n.onnx exists  → load it directly (fast path).
-          2. If only yolov8n.pt exists → export to ONNX, then load ONNX.
+          1. If the configured .onnx exists → load it directly (fast path).
+          2. If only the configured .pt exists → export to ONNX, then load ONNX.
           3. If neither exists        → download .pt, export to ONNX, load ONNX.
 
         See docs/model-improvements.md for tuning and custom-training details.
@@ -201,7 +201,7 @@ class Detector:
 
     def detect(self, frame: np.ndarray, frame_id: int = -1) -> DetectionResult:
         """
-        Run YOLOv8n inference on a BGR frame.
+        Run YOLO inference on a BGR frame.
 
         Args:
             frame:    BGR uint8 ndarray from the camera.
@@ -253,7 +253,6 @@ class Detector:
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 nx1, ny1 = x1 / w, y1 / h
                 nx2, ny2 = x2 / w, y2 / h
-                bbox_w_n = nx2 - nx1
                 bbox_h_n = ny2 - ny1
                 cx_n = (nx1 + nx2) / 2.0  # normalised centre x
 

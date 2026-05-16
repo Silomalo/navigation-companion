@@ -74,87 +74,100 @@ def main() -> None:
     signal.signal(signal.SIGINT,  _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # ── Start hardware threads ────────────────────────────────────────────
-    log.info("Loading YOLOv8n model …")
-    detector.load()
+    camera_started = False
+    mic_started = False
+    speaker_started = False
 
-    log.info("Starting camera …")
-    camera.start()
+    try:
+        # ── Start hardware threads ────────────────────────────────────────
+        log.info("Loading YOLO model …")
+        detector.load()
 
-    log.info("Starting microphone …")
-    mic.start()
+        log.info("Starting camera …")
+        camera.start()
+        camera_started = True
 
-    log.info("Starting speaker …")
-    speaker.start()
+        log.info("Starting microphone …")
+        mic.start()
+        mic_started = True
 
-    speaker.say("Navigation assistant ready.")
-    log.info("System ready.  Press Ctrl-C to stop.")
+        log.info("Starting speaker …")
+        speaker.start()
+        speaker_started = True
 
-    # ── Main perception-action loop ───────────────────────────────────────
-    frame_id   = 0
-    loop_interval = 1.0 / DETECT_FPS
-    last_fps_log  = time.monotonic()
-    frames_since_log = 0
+        speaker.say("Navigation assistant ready.")
+        log.info("System ready.  Press Ctrl-C to stop.")
 
-    while running:
-        t_start = time.monotonic()
+        # ── Main perception-action loop ───────────────────────────────────
+        frame_id   = 0
+        loop_interval = 1.0 / DETECT_FPS
+        last_fps_log  = time.monotonic()
+        frames_since_log = 0
 
-        # ── 1. Grab latest frame ──────────────────────────────────────
-        frame = camera.read()
-        if frame is None:
-            time.sleep(0.05)
-            continue
+        while running:
+            t_start = time.monotonic()
 
-        # ── 2. Detect obstacles ───────────────────────────────────────
-        result = detector.detect(frame, frame_id=frame_id)
-        frame_id += 1
-        frames_since_log += 1
+            # ── 1. Grab latest frame ──────────────────────────────────
+            frame = camera.read()
+            if frame is None:
+                time.sleep(0.05)
+                continue
 
-        # ── 3. Navigation logic ───────────────────────────────────────
-        nav.update(result)
+            # ── 2. Detect obstacles ───────────────────────────────────
+            result = detector.detect(frame, frame_id=frame_id)
+            frame_id += 1
+            frames_since_log += 1
 
-        # ── 4. Speak pending instructions ─────────────────────────────
-        for text, urgent in nav.pending_speech():
-            speaker.say(text, urgent=urgent)
+            # ── 3. Navigation logic ───────────────────────────────────
+            nav.update(result)
 
-        # ── 5. Process any voice commands ─────────────────────────────
-        cmd = mic.pending_utterance()
-        if cmd:
-            nav.handle_command(cmd)
+            # ── 4. Speak pending instructions ─────────────────────────
             for text, urgent in nav.pending_speech():
                 speaker.say(text, urgent=urgent)
 
-            # Handle stop command in main loop.
-            if any(w in cmd.lower() for w in ("stop", "quit", "exit")):
-                running = False
+            # ── 5. Process any voice commands ─────────────────────────
+            cmd = mic.pending_utterance()
+            if cmd:
+                nav.handle_command(cmd)
+                for text, urgent in nav.pending_speech():
+                    speaker.say(text, urgent=urgent)
 
-        # ── 6. FPS telemetry ──────────────────────────────────────────
-        now = time.monotonic()
-        if now - last_fps_log >= 10.0:
-            fps = frames_since_log / (now - last_fps_log)
-            log.info(
-                "Running at %.1f fps  |  topo: %s",
-                fps, topo.get_stats(),
-            )
-            last_fps_log = now
-            frames_since_log = 0
+                # Handle stop command in main loop.
+                if any(w in cmd.lower() for w in ("stop", "quit", "exit")):
+                    running = False
 
-        # ── 7. Sleep to maintain DETECT_FPS ──────────────────────────
-        elapsed = time.monotonic() - t_start
-        sleep_t = loop_interval - elapsed
-        if sleep_t > 0:
-            time.sleep(sleep_t)
+            # ── 6. FPS telemetry ──────────────────────────────────────
+            now = time.monotonic()
+            if now - last_fps_log >= 10.0:
+                fps = frames_since_log / (now - last_fps_log)
+                log.info(
+                    "Running at %.1f fps  |  topo: %s",
+                    fps, topo.get_stats(),
+                )
+                last_fps_log = now
+                frames_since_log = 0
 
-    # ── Clean shutdown ────────────────────────────────────────────────────
-    log.info("Shutting down …")
-    speaker.say("Goodbye.")
-    time.sleep(1.5)   # let TTS finish
+            # ── 7. Sleep to maintain DETECT_FPS ──────────────────────
+            elapsed = time.monotonic() - t_start
+            sleep_t = loop_interval - elapsed
+            if sleep_t > 0:
+                time.sleep(sleep_t)
 
-    camera.stop()
-    mic.stop()
-    speaker.stop()
+    finally:
+        # ── Clean shutdown ────────────────────────────────────────────────
+        log.info("Shutting down …")
+        if speaker_started:
+            speaker.say("Goodbye.")
+            time.sleep(1.5)   # let TTS finish
 
-    log.info("Navigation Assistant stopped.")
+        if camera_started:
+            camera.stop()
+        if mic_started:
+            mic.stop()
+        if speaker_started:
+            speaker.stop()
+
+        log.info("Navigation Assistant stopped.")
 
 
 if __name__ == "__main__":

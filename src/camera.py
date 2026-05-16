@@ -3,7 +3,7 @@ camera.py — Camera capture with automatic hardware/simulation selection.
 
 Hardware mode  (SIMULATE=0):
     Uses picamera2 (the official RPi camera stack for Bullseye/Bookworm).
-    Outputs BGR NumPy arrays for OpenCV / YOLOv8 compatibility.
+    Outputs BGR NumPy arrays for OpenCV / YOLO compatibility.
 
 Simulation mode (SIMULATE=1, or picamera2 unavailable):
     Falls back to OpenCV VideoCapture so the full pipeline can be developed
@@ -29,7 +29,6 @@ from config import (
     CAMERA_FORMAT,
     CAMERA_HEIGHT,
     CAMERA_WIDTH,
-    DETECT_FPS,
     SIM_CAMERA_INDEX,
     SIMULATE,
 )
@@ -54,11 +53,14 @@ class Camera:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._backend: str = ""
+        self._error: Optional[BaseException] = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     def start(self) -> None:
         """Start the capture thread.  Returns immediately."""
+        self._stop_event.clear()
+        self._error = None
         if SIMULATE:
             self._thread = threading.Thread(
                 target=self._sim_loop, name="camera-sim", daemon=True
@@ -76,7 +78,12 @@ class Camera:
         while time.monotonic() < deadline:
             if self._frame is not None:
                 break
+            if self._error is not None:
+                break
             time.sleep(0.05)
+
+        if self._error is not None and not SIMULATE:
+            raise RuntimeError("Camera failed to start in hardware mode") from self._error
 
         if self._frame is None:
             log.warning("[camera] no frame received within 3 s — check hardware")
@@ -105,17 +112,14 @@ class Camera:
         try:
             from picamera2 import Picamera2  # type: ignore
         except ImportError:
-            log.warning(
-                "[camera] picamera2 not installed — falling back to simulation"
-            )
-            self._backend = "OpenCV-fallback"
-            self._sim_loop()
+            self._error = RuntimeError("picamera2 is not installed")
+            log.error("[camera] picamera2 not installed")
             return
 
         try:
             cam = Picamera2()
             config = cam.create_video_configuration(
-                main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": "BGR888"},
+                main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": CAMERA_FORMAT},
                 controls={"FrameRate": float(CAMERA_FPS)},
             )
             cam.configure(config)
@@ -133,9 +137,8 @@ class Camera:
             cam.stop()
 
         except Exception as exc:  # noqa: BLE001
-            log.error("[camera] hardware error: %s — falling back to simulation", exc)
-            self._backend = "OpenCV-fallback"
-            self._sim_loop()
+            self._error = exc
+            log.error("[camera] hardware error: %s", exc)
 
     # ── simulation / webcam capture loop (OpenCV) ─────────────────────────
 

@@ -25,8 +25,10 @@ from __future__ import annotations
 import logging
 import platform
 import queue
+import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -71,7 +73,7 @@ class Speaker:
         log.info("[tts] speaker started")
 
     def stop(self) -> None:
-        # Drain queue then send sentinel.
+        # Send sentinel; the worker will stop any active subprocess speech.
         self._queue.put(_SpeechRequest(text="", shutdown=True))
         if self._thread:
             self._thread.join(timeout=5.0)
@@ -108,33 +110,86 @@ class Speaker:
 
     @property
     def is_speaking(self) -> bool:
-        return not self._queue.empty()
+        return bool(self._current_text) or not self._queue.empty()
 
     # ── background TTS thread ─────────────────────────────────────────────
 
     def _run(self) -> None:
         if _IS_MACOS:
-            self._macos_say_loop()
+            self._subprocess_loop(self._macos_cmd)
+        elif shutil.which("espeak-ng"):
+            self._subprocess_loop(self._espeak_cmd)
         else:
             self._pyttsx3_loop()
 
-    def _macos_say_loop(self) -> None:
-        """macOS TTS via the built-in `say` command (thread-safe)."""
-        log.info("[tts] macOS — using 'say' command  rate=%d", TTS_RATE)
+    def _macos_cmd(self, text: str) -> list[str]:
+        """Build a macOS `say` command."""
+        if TTS_VOICE:
+            return ["say", "-v", TTS_VOICE, "-r", str(TTS_RATE), text]
+        return ["say", "-r", str(TTS_RATE), text]
+
+    def _espeak_cmd(self, text: str) -> list[str]:
+        """Build a Linux/RPi espeak-ng command."""
+        cmd = ["espeak-ng", "-s", str(TTS_RATE), "-a", str(int(TTS_VOLUME * 200))]
+        if TTS_VOICE:
+            cmd.extend(["-v", TTS_VOICE])
+        cmd.append(text)
+        return cmd
+
+    def _subprocess_loop(self, cmd_builder) -> None:  # noqa: ANN001
+        """TTS loop that can interrupt active speech for urgent requests."""
+        if _IS_MACOS:
+            log.info("[tts] macOS — using 'say' command  rate=%d", TTS_RATE)
+        else:
+            log.info("[tts] Linux — using espeak-ng  rate=%d", TTS_RATE)
+
+        req: Optional[_SpeechRequest] = None
+        proc: Optional[subprocess.Popen] = None
+
         while True:
-            try:
-                req = self._queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
+            if req is None:
+                req = self._queue.get()
+
             if req.shutdown:
+                if proc and proc.poll() is None:
+                    _terminate_process(proc)
                 break
+
             log.info("[tts] speaking: '%s'", req.text)
             self._current_text = req.text
-            cmd = ["say", "-r", str(TTS_RATE), req.text]
-            if TTS_VOICE:
-                cmd = ["say", "-v", TTS_VOICE, "-r", str(TTS_RATE), req.text]
-            subprocess.run(cmd, check=False)
+            proc = subprocess.Popen(cmd_builder(req.text))
+
+            interrupted = False
+            while proc.poll() is None:
+                try:
+                    next_req = self._queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+
+                if next_req.shutdown:
+                    _terminate_process(proc)
+                    self._current_text = ""
+                    return
+
+                if next_req.urgent:
+                    _terminate_process(proc)
+                    _drain_queue(self._queue)
+                    req = next_req
+                    interrupted = True
+                    break
+
+                # Preserve non-urgent messages behind the active phrase.
+                self._queue.put(next_req)
+                time.sleep(0.05)
+
+            if not interrupted:
+                req = None
             self._current_text = ""
+
+    def _macos_say_loop(self) -> None:
+        """Compatibility wrapper for older callers."""
+        log.info("[tts] macOS — using 'say' command  rate=%d", TTS_RATE)
+        self._subprocess_loop(self._macos_cmd)
 
     def _pyttsx3_loop(self) -> None:
         """Linux / RPi TTS via pyttsx3 + espeak."""
@@ -202,3 +257,13 @@ def _drain_queue(q: queue.Queue) -> None:
             q.get_nowait()
         except queue.Empty:
             break
+
+
+def _terminate_process(proc: subprocess.Popen) -> None:
+    """Stop an active TTS subprocess without hanging shutdown."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=0.5)

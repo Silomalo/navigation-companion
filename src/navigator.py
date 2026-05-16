@@ -20,7 +20,7 @@ import re
 import time
 from typing import Optional
 
-from config import FEEDBACK_MIN_INTERVAL_S, URGENT_CLOSE_FRACTION
+from config import FEEDBACK_MIN_INTERVAL_S
 from detector import Detection, DetectionResult, Proximity, Zone
 from topo_map import TopoMap
 

@@ -12,7 +12,7 @@
 3. [Module Breakdown](#3-module-breakdown)
    - [config.py](#configpy--central-configuration)
    - [camera.py](#camerapy--camera-abstraction)
-   - [detector.py](#detectorpy--yolov8n-obstacle-detection)
+   - [detector.py](#detectorpy--yolo-obstacle-detection)
    - [navigator.py](#navigatorpy--navigation-logic)
    - [topo_map.py](#topo_mappy--topological-route-memory)
    - [audio_in.py](#audio_inpy--microphone--speech-to-text)
@@ -34,7 +34,7 @@
 The Navigation Companion is a **real-time, fully offline** assistive tool that:
 
 - **Watches** the environment via a camera (RPi camera module or webcam)
-- **Detects** obstacles using a YOLOv8n neural network (80 COCO classes)
+- **Detects** obstacles using a YOLO11n neural network (80 COCO classes)
 - **Classifies** each obstacle by its spatial zone (left / ahead / right) and
   distance (very close / ahead / in the distance)
 - **Speaks** navigation warnings through earphones via text-to-speech (no
@@ -65,7 +65,7 @@ The Navigation Companion is a **real-time, fully offline** assistive tool that:
 | `camera-hw` / `camera-sim` | `Camera` | Continuous frame capture |
 | `mic-capture` | `Microphone` | PCM audio blocks from mic |
 | `mic-stt` | `Microphone` | Whisper transcription (VAD-gated) |
-| `tts` | `Speaker` | Serialise pyttsx3 speech requests |
+| `tts` | `Speaker` | Serialise text-to-speech requests |
 | **main** | `main.py` | Detect → Navigate → Sleep loop |
 
 ---
@@ -82,7 +82,7 @@ Key sections:
 | Section | Notable values |
 |---|---|
 | Camera | 1280 × 720 @ 30 fps capture, **10 fps** inference sub-sampling |
-| YOLOv8 | `yolov8n.pt`, confidence ≥ 0.45, IOU ≤ 0.45, runs on `cpu` |
+| YOLO | `yolo11n.pt`, confidence ≥ 0.45, IOU ≤ 0.45, runs on `cpu` |
 | Zones | Left edge at 33 %, right edge at 67 % of frame width |
 | Proximity | Bounding-box height ≥ 55 % → *very close*; ≥ 30 % → *ahead* |
 | Speech | Min 2.5 s between announcements (prevents audio fatigue) |
@@ -111,9 +111,9 @@ Callers never block on I/O — they just call `camera.read()`.
 
 ---
 
-### `detector.py` — YOLOv8n Obstacle Detection
+### `detector.py` — YOLO Obstacle Detection
 
-Wraps Ultralytics YOLOv8n with navigation-specific post-processing.
+Wraps the configured Ultralytics YOLO model with navigation-specific post-processing.
 
 **Detection pipeline per frame:**
 
@@ -442,10 +442,10 @@ All values live in `src/config.py`.
 
 | Package | Purpose |
 |---|---|
-| `ultralytics` | YOLOv8n model inference |
+| `ultralytics` | YOLO11n model inference |
 | `opencv-python` | Camera capture, image processing, simulation window |
 | `numpy` | Array operations, feature vectors |
-| `openai-whisper` | Local speech-to-text (no internet) |
+| `faster-whisper` | Local speech-to-text (no internet) |
 | `sounddevice` | Cross-platform microphone capture (ALSA / CoreAudio) |
 | `pyttsx3` | Offline text-to-speech (espeak on Linux, SAPI5 on Windows) |
 | `picamera2` | RPi camera module (hardware only, pre-installed on RPi OS) |

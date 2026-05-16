@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
-import math
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -84,6 +84,7 @@ class TopoMap:
         self._current_node_id: Optional[int] = None
         self._last_record_t: float = 0.0
         self._map_file: Path = TOPO_MAP_FILE
+        self._lock = threading.RLock()
         self._load()
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -93,78 +94,81 @@ class TopoMap:
         Update the map with a new observation.
         Called every detection frame; rate-limited internally.
         """
-        now = time.monotonic()
-        if now - self._last_record_t < TOPO_RECORD_INTERVAL_S:
-            return
-        self._last_record_t = now
+        with self._lock:
+            now = time.monotonic()
+            if now - self._last_record_t < TOPO_RECORD_INTERVAL_S:
+                return
 
-        vec = result.feature_vector()
-        # Only record if there is something meaningful to fingerprint.
-        if np.sum(vec) < 0.01:
-            return
+            vec = result.feature_vector()
+            # Only record if there is something meaningful to fingerprint.
+            if np.sum(vec) < 0.01:
+                return
+            self._last_record_t = now
 
-        matched_id, sim = self._find_similar(vec)
+            matched_id, sim = self._find_similar(vec)
 
-        if matched_id is not None and sim >= TOPO_SIMILARITY_THRESH:
-            # Revisiting a known place.
-            node = self._nodes[matched_id]
-            node.visit_count += 1
-            # Update feature with exponential moving average.
-            alpha = 0.1
-            node.feature = (
-                ((1 - alpha) * node.feature_array + alpha * vec).tolist()
-            )
-            prev_id, self._current_node_id = self._current_node_id, matched_id
-        else:
-            # New place — create node.
-            node = TopoNode(
-                node_id=self._next_id,
-                label=f"Location {self._next_id}",
-                feature=vec.tolist(),
-                first_seen=time.time(),
-            )
-            self._nodes[self._next_id] = node
-            prev_id, self._current_node_id = self._current_node_id, self._next_id
-            self._next_id += 1
-            log.info("[topo] new location: %s (total=%d)", node.label, len(self._nodes))
+            if matched_id is not None and sim >= TOPO_SIMILARITY_THRESH:
+                # Revisiting a known place.
+                node = self._nodes[matched_id]
+                node.visit_count += 1
+                # Update feature with exponential moving average.
+                alpha = 0.1
+                node.feature = (
+                    ((1 - alpha) * node.feature_array + alpha * vec).tolist()
+                )
+                prev_id, self._current_node_id = self._current_node_id, matched_id
+            else:
+                # New place — create node.
+                node = TopoNode(
+                    node_id=self._next_id,
+                    label=f"Location {self._next_id}",
+                    feature=vec.tolist(),
+                    first_seen=time.time(),
+                )
+                self._nodes[self._next_id] = node
+                prev_id, self._current_node_id = self._current_node_id, self._next_id
+                self._next_id += 1
+                log.info("[topo] new location: %s (total=%d)", node.label, len(self._nodes))
 
-        # Record edge between previous and current node.
-        if prev_id is not None and prev_id != self._current_node_id:
-            self._add_edge(prev_id, self._current_node_id)
+            # Record edge between previous and current node.
+            if prev_id is not None and prev_id != self._current_node_id:
+                self._add_edge(prev_id, self._current_node_id)
 
-        self._save()
+            self._save()
 
     def describe_current_location(self) -> Optional[str]:
         """
         Return a human-readable description of the current location.
         Includes how many times the user has been here and what neighbours exist.
         """
-        if self._current_node_id is None:
-            return None
-        node = self._nodes.get(self._current_node_id)
-        if node is None:
-            return None
+        with self._lock:
+            if self._current_node_id is None:
+                return None
+            node = self._nodes.get(self._current_node_id)
+            if node is None:
+                return None
 
-        desc = f"You are at {node.label}."
-        desc += f" You have been here {node.visit_count} time{'s' if node.visit_count > 1 else ''}."
+            desc = f"You are at {node.label}."
+            desc += f" You have been here {node.visit_count} time{'s' if node.visit_count > 1 else ''}."
 
-        if node.neighbours:
-            n_labels = [
-                self._nodes[nid].label
-                for nid in node.neighbours
-                if nid in self._nodes
-            ]
-            if n_labels:
-                desc += f" Connected to: {', '.join(n_labels[:3])}."
+            if node.neighbours:
+                n_labels = [
+                    self._nodes[nid].label
+                    for nid in node.neighbours
+                    if nid in self._nodes
+                ]
+                if n_labels:
+                    desc += f" Connected to: {', '.join(n_labels[:3])}."
 
-        return desc
+            return desc
 
     def get_stats(self) -> dict:
-        return {
-            "nodes": len(self._nodes),
-            "edges": len(self._edges),
-            "current": self._current_node_id,
-        }
+        with self._lock:
+            return {
+                "nodes": len(self._nodes),
+                "edges": len(self._edges),
+                "current": self._current_node_id,
+            }
 
     # ── Persistence ───────────────────────────────────────────────────────
 
