@@ -57,8 +57,8 @@ def main() -> None:
 
     # ── Instantiate subsystems ────────────────────────────────────────────
     camera  = Camera()
-    mic     = Microphone()
     speaker = Speaker()
+    mic     = Microphone(speech_active=lambda: speaker.is_speaking)
     topo    = TopoMap()
     detector = Detector()
     nav      = Navigator(topo_map=topo)

@@ -5,7 +5,7 @@ Runs two cooperating threads:
   1. capture_thread  — sounddevice InputStream fills a raw PCM ring buffer.
   2. stt_thread      — drains the ring buffer, runs Voice Activity Detection
                        (simple energy threshold), and when speech is detected
-                       transcribes with OpenAI Whisper (local, no internet).
+                       transcribes with faster-whisper (local, no internet).
 
 Callers receive completed utterances from an output queue:
     mic = Microphone()
@@ -26,7 +26,7 @@ import math
 import queue
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -36,6 +36,7 @@ from config import (
     MIC_DTYPE,
     MIC_SAMPLE_RATE,
     MIC_SILENCE_THRESH,
+    MIC_TTS_SUPPRESS_AFTER_S,
     WHISPER_MODEL,
 )
 
@@ -53,12 +54,14 @@ class Microphone:
     Thread-safe.  start() / stop() are idempotent.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, speech_active: Optional[Callable[[], bool]] = None) -> None:
         self._utterance_queue: queue.Queue[str] = queue.Queue()
         self._pcm_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._stt_available = False
+        self._speech_active = speech_active
+        self._suppress_until_t = 0.0
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -174,6 +177,17 @@ class Microphone:
             try:
                 block = self._pcm_queue.get(timeout=0.2)
             except queue.Empty:
+                continue
+
+            now = time.monotonic()
+            if self._speech_active and self._speech_active():
+                collecting.clear()
+                in_speech = False
+                self._suppress_until_t = now + MIC_TTS_SUPPRESS_AFTER_S
+                continue
+            if now < self._suppress_until_t:
+                collecting.clear()
+                in_speech = False
                 continue
 
             rms = _rms(block)

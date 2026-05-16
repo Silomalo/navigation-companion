@@ -60,6 +60,11 @@ DIST_MEDIUM_THRESH: float = 0.30  # bbox_h > this → "ahead"
 # Minimum seconds between two spoken navigation instructions.
 # Prevents audio spam while the user is walking.
 FEEDBACK_MIN_INTERVAL_S: float = 2.5
+# Repeat the same urgent scene at most this often. Urgent warnings still fire
+# immediately when the obstacle mix changes.
+URGENT_REPEAT_INTERVAL_S: float = 6.0
+# Repeat the exact same non-urgent phrase at most this often.
+SAME_SPEECH_REPEAT_INTERVAL_S: float = 12.0
 
 # ── Microphone / Speech-to-Text ───────────────────────────────────────────────
 MIC_SAMPLE_RATE: int = 16_000  # Hz — Whisper requires 16 kHz
@@ -67,6 +72,8 @@ MIC_CHANNELS: int = 1  # mono
 MIC_DTYPE: str = "int16"  # sample format
 MIC_BLOCK_FRAMES: int = 8_000  # 0.5 s per capture block
 MIC_SILENCE_THRESH: float = 300.0  # RMS threshold for voice activity detection
+MIC_TTS_SUPPRESS_AFTER_S: float = 0.6  # ignore mic briefly after our own TTS
+MIC_MAX_COMMAND_WORDS: int = 18  # longer transcripts are usually TTS echo/noise
 
 # Whisper model size: "tiny" (39 MB) runs in real-time on RPi 5.
 # Options: tiny, base, small, medium, large  (larger = more accurate, slower)

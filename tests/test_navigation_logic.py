@@ -68,7 +68,10 @@ class NavigatorTests(unittest.TestCase):
 
         nav.update(result)
 
-        self.assertEqual(nav.pending_speech(), [("Warning! person ahead", True)])
+        self.assertEqual(
+            nav.pending_speech(),
+            [("Warning! person very close ahead. Slow down", True)],
+        )
 
     def test_where_command_uses_topological_location(self) -> None:
         nav = Navigator(FakeTopoMap())
@@ -93,6 +96,29 @@ class NavigatorTests(unittest.TestCase):
         self.assertEqual(len(speech), 1)
         self.assertIn("I can see 1 object", speech[0][0])
         self.assertFalse(speech[0][1])
+
+    def test_repeated_urgent_scene_is_suppressed(self) -> None:
+        nav = Navigator(FakeTopoMap())
+        result = DetectionResult(
+            frame_id=1,
+            timestamp=time.time(),
+            detections=[make_detection()],
+        )
+
+        nav.update(result)
+        nav.pending_speech()
+        nav.update(result)
+
+        self.assertEqual(nav.pending_speech(), [])
+
+    def test_tts_echo_is_ignored_as_command(self) -> None:
+        nav = Navigator(FakeTopoMap())
+
+        nav.handle_command(
+            "Warning, person ahead, I heard warning, person ahead, say help for commands"
+        )
+
+        self.assertEqual(nav.pending_speech(), [])
 
 
 if __name__ == "__main__":

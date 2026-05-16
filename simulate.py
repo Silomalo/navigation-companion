@@ -243,7 +243,7 @@ def run_simulation(
     topo = TopoMap()
     nav = Navigator(topo_map=topo)
     speaker = Speaker()
-    mic = Microphone()
+    mic = Microphone(speech_active=lambda: speaker.is_speaking)
 
     speaker.start()
     mic.start()
